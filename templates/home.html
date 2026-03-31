@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wafora - Request Checker</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script> 
+    
+    <style>
+        /* --- General Layout and Theme (RELYING ON styles.css FOR FONT-FAMILY) --- */
+        body { background-color: #2C3930; color: #DCD7C9; }
+        
+        .checker-section {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column; 
+            align-items: center;
+            justify-content: flex-start;
+            padding: 4rem 2rem; 
+        }
+
+        .checker-container {
+            max-width: 1000px; /* Wider container */
+            width: 95%;
+            padding: 3rem;
+            background: #3F4F44; 
+            border-radius: 24px;
+            border: 1px solid rgba(162, 123, 92, 0.15); 
+            backdrop-filter: blur(10px);
+            z-index: 2;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+            margin-bottom: 3rem; /* Space below the main card */
+        }
+
+        .checker-header { text-align: center; margin-bottom: 2rem; }
+        .checker-header h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(90deg, #DCD7C9, #A27B5C);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .input-group { position: relative; margin-bottom: 2rem; }
+        #user-input {
+            width: 100%;
+            padding: 1.2rem;
+            background: rgba(220, 215, 201, 0.05);
+            border: 2px solid rgba(162, 123, 92, 0.2); 
+            border-radius: 8px;
+            color: #DCD7C9; 
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+            box-sizing: border-box; 
+        }
+        #user-input:focus { outline: none; border-color: rgba(162, 123, 92, 0.4); box-shadow: 0 0 20px rgba(162, 123, 92, 0.1); }
+        #submit-btn { width: 100%; padding: 1.2rem; margin-top: 1rem; font-size: 1.1rem; box-sizing: border-box; }
+        #loading { display: none; text-align: center; padding: 1rem; color: #A27B5C; font-weight: 500; }
+        .loading-spinner { 
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(162, 123, 92, 0.3);
+            border-radius: 50%;
+            border-top-color: #A27B5C; 
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+
+        /* --- NEW: Result Display & Two-Layered Status --- */
+        #waf-results-area {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .verdict-box {
+            background: rgba(162, 123, 92, 0.05);
+            border: 1px solid rgba(162, 123, 92, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .final-status {
+            text-align: center;
+            padding: 1rem;
+            border-radius: 8px;
+            font-size: 1.3rem;
+            font-weight: 700;
+            transition: all 0.5s;
+        }
+        .status-valid { background: #28b463; color: white; }
+        .status-malicious { background: #e74c3c; color: white; }
+        .status-error { background: #f39c12; color: #3F4F44; }
+
+
+        .layer-status {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            border-radius: 6px;
+            background: rgba(220, 215, 201, 0.05);
+            border: 1px solid rgba(162, 123, 92, 0.1);
+            transition: all 0.3s;
+        }
+
+        .layer-item.passed { border-left: 5px solid #2ecc71; }
+        .layer-item.blocked { border-left: 5px solid #e74c3c; }
+        .layer-item.obfuscated { border-left: 5px solid #f39c12; }
+        .layer-item.not-checked { border-left: 5px solid #888; }
+        
+        .layer-icon { font-size: 1.5rem; min-width: 25px; text-align: center; }
+        .layer-info { flex-grow: 1; }
+        .layer-info h4 { margin: 0; font-size: 1.1rem; color: #A27B5C; }
+        .layer-info p { margin: 0; font-size: 0.9rem; color: #DCD7C9; }
+        
+        .ml-score-bar {
+            height: 10px;
+            background: #DCD7C9;
+            border-radius: 5px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+        .ml-score-fill {
+            height: 100%;
+            transition: width 0.5s ease-in-out;
+            background: linear-gradient(90deg, #2ecc71, #e74c3c);
+        }
+        
+        /* Features Table */
+        .features-table {
+            margin-top: 2rem;
+        }
+        .features-table h4 {
+            color: #DCD7C9;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(162, 123, 92, 0.2);
+            padding-bottom: 5px;
+        }
+        .features-table table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .features-table th, .features-table td {
+            padding: 0.5rem;
+            border: 1px solid rgba(162, 123, 92, 0.1);
+            text-align: left;
+        }
+        .features-table th {
+            background: rgba(162, 123, 92, 0.1);
+            color: #DCD7C9;
+            font-weight: 400;
+        }
+
+        @media (max-width: 768px) {
+            #waf-results-area {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* --- New Live Log Styles --- */
+        .log-monitor-container {
+            max-width: 1000px;
+            width: 95%;
+            margin: 0 auto 4rem auto;
+            padding: 2rem;
+            background: #3F4F44; 
+            border-radius: 24px;
+            border: 1px solid rgba(162, 123, 92, 0.15); 
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+        }
+        .log-monitor-container h3 {
+            color: #c1946c;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+        }
+        
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-left">
+            <a href="/" class="logo">
+                <span class="logo-icon">🛡️</span>
+                <span class="logo-text">Wafora</span>
+            </a>
+        </div>
+        <div class="nav-right">
+            <a href="{{ url_for('main.download_report') }}" class="neon-btn" title="Download Security Report" download>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 0.5rem;">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Download Report
+            </a>
+        </div>
+    </nav>
+
+    <section class="checker-section">
+        <div class="cyber-grid"></div>
+        
+        <div class="checker-container">
+            <div class="checker-header">
+                <h2>WAF Request Analyzer (Hybrid Defense)</h2>
+                <p>Simulate incoming traffic to see how the multi-layered WAF handles known and zero-day threats.</p>
+            </div>
+
+            <div class="input-group">
+                <input type="text" id="user-input" placeholder="Enter URI or payload to check (e.g., 1' or '1'='1'--)..." autocomplete="off">
+                <button class="neon-btn" id="submit-btn">Analyze Request</button>
+            </div>
+            
+            <div id="loading">
+                <div class="loading-spinner"></div>
+                Analyzing request pattern...
+            </div>
+            
+            <div id="waf-results-area" style="display: none;">
+                <div class="layer-column">
+                    <div id="final-verdict" class="final-status status-valid">
+                        Final Verdict: Awaiting Analysis...
+                    </div>
+                    
+                    <div class="layer-status">
+                        <h3 style="color: #c1946c; margin-top: 1rem;">Defense Layers 🛡️</h3>
+
+                        <div id="layer-signature" class="layer-item not-checked">
+                            <div class="layer-icon">🗂️</div>
+                            <div class="layer-info">
+                                <h4>Layer 1: Signature/Blacklist Check</h4>
+                                <p id="signature-status-text">Scanning against known attack database...</p>
+                            </div>
+                        </div>
+
+                        <div id="layer-ml" class="layer-item not-checked">
+                            <div class="layer-icon">🧠</div>
+                            <div class="layer-info">
+                                <h4>Layer 2: AI Anomaly Detection</h4>
+                                <p id="ml-status-text">Status: Not Checked</p>
+                                <div id="ml-score-container" style="display:none;">
+                                    <div class="ml-score-bar">
+                                        <div id="ml-score-fill" class="ml-score-fill" style="width:0%;"></div>
+                                    </div>
+                                    <small id="ml-score-label">ML Confidence: 0.00% (Threshold: 50%)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="message-column">
+                    <div id="result" class="verdict-box">
+                        <h3 style="color: #DCD7C9; margin: 0; border-bottom: 1px solid rgba(162, 123, 92, 0.2); padding-bottom: 10px;">WAF Decision Details</h3>
+                        <p id="decision-message" style="color: #A27B5C;">The WAF is ready to process your request.</p>
+                    </div>
+                    
+                    <div id="features-display" class="features-table" style="display:none;">
+                        <h4>Extracted Features (AI Input)</h4>
+                        <table id="features-table-content">
+                            </table>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+        
+        <div class="log-monitor-container">
+            <h3>Live Traffic Monitor 👁️</h3>
+            <div id="live-log-container">
+                <p style="text-align: center; color: rgba(220, 215, 201, 0.5);">Awaiting first WAF log entries...</p>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h3>WAF Traffic Analysis</h3>
+            <div class="chart-wrapper">
+                <canvas id="wafPieChart"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <div class="security-tips-wrapper">
+        </div>
+
+    <script src="{{ url_for('static', filename='home.js') }}" defer></script>
+</body>
+</html>
