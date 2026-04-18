@@ -122,6 +122,13 @@ function fetchAndUpdateStats() {
         });
 }
 
+// --- HTML ESCAPE HELPER ---
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+}
+
 // --- LIVE LOG FETCHING ---
 function fetchLiveLogs() {
     const url = LOG_API_URL + '?t=' + Date.now(); // cache-busting
@@ -161,8 +168,8 @@ function fetchLiveLogs() {
                     return `
                         <div class="log-entry ${statusClass}">
                             <span class="log-icon">${icon}</span>
-                            <span class="log-time">[${timestamp}]</span>
-                            <span class="log-message">${message}</span>
+                            <span class="log-time">[${escapeHtml(timestamp)}]</span>
+                            <span class="log-message">${escapeHtml(message)}</span>
                         </div>
                     `;
                 }).join('');
