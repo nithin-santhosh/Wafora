@@ -14,3 +14,11 @@ function scrollToHowItWorks() {
     }
 }
 
+// Attach event listener for "Learn More" button (avoids inline onclick handler)
+document.addEventListener('DOMContentLoaded', function () {
+    const learnMoreBtn = document.getElementById('learn-more-btn');
+    if (learnMoreBtn) {
+        learnMoreBtn.addEventListener('click', scrollToHowItWorks);
+    }
+});
+

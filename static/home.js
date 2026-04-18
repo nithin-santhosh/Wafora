@@ -419,7 +419,7 @@ document.addEventListener("DOMContentLoaded", function () {
         fetchAndUpdateStats();
         fetchLiveLogs();
 
-        setTimeout(startPolling, 200);
+        setTimeout(startPolling, 5000);
     })();
 
     // Force update when tab becomes visible (in case of throttling)
