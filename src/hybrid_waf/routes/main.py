@@ -23,7 +23,8 @@ def require_admin_auth(f):
     Enforces HTTP Basic Auth on decorated routes when WAFORA_ADMIN_USER and
     WAFORA_ADMIN_PASS environment variables are set.  If the variables are not
     set the guard is a no-op so development environments work without extra
-    configuration.
+    configuration, but a warning is logged each time the endpoint is hit so
+    operators are alerted that the endpoint is unprotected.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -37,6 +38,13 @@ def require_admin_auth(f):
                     401,
                     {'WWW-Authenticate': 'Basic realm="Wafora Admin"'}
                 )
+        else:
+            current_app.logger.warning(
+                "Admin endpoint '%s' accessed without WAFORA_ADMIN_USER / "
+                "WAFORA_ADMIN_PASS configured. Set these env vars in production "
+                "to protect sensitive endpoints.",
+                request.path,
+            )
         return f(*args, **kwargs)
     return decorated
 

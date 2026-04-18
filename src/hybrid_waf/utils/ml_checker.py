@@ -1,9 +1,15 @@
 import os
 import hashlib
 import joblib
+import logging
 
 # --- CONFIGURATION ---
-ML_THRESHOLD = 0.50 
+ML_THRESHOLD = 0.50
+
+_logger = logging.getLogger(__name__)
+
+# Read buffer size used when hashing the model file
+_HASH_CHUNK_SIZE = 65536
 
 # 1. Get the directory of the current script (ml_checker.py)
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +31,7 @@ def _compute_file_hash(path: str) -> str:
     """Computes the SHA-256 hash of a file to verify its integrity."""
     h = hashlib.sha256()
     with open(path, 'rb') as f:
-        for chunk in iter(lambda: f.read(65536), b''):
+        for chunk in iter(lambda: f.read(_HASH_CHUNK_SIZE), b''):
             h.update(chunk)
     return h.hexdigest()
 

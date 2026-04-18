@@ -48,7 +48,19 @@ app = Flask(__name__)
 
 # --- 4. SECRET KEY ---
 # Use the env var in production; fall back to a random key per process for development.
-app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    import warnings
+    warnings.warn(
+        "SECRET_KEY environment variable is not set. "
+        "A random key is being used, which will invalidate sessions on restart "
+        "and will not work correctly in multi-process deployments. "
+        "Set SECRET_KEY to a long random string in production.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+    _secret_key = secrets.token_hex(32)
+app.secret_key = _secret_key
 
 # Register blueprints
 app.register_blueprint(main_bp)

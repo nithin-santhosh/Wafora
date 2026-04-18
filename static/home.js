@@ -123,6 +123,12 @@ function fetchAndUpdateStats() {
 }
 
 // --- HTML ESCAPE HELPER ---
+/**
+ * Escapes HTML special characters in a string to prevent XSS when inserting
+ * user-controlled content into the DOM via innerHTML.
+ * @param {string} str - The untrusted string to escape.
+ * @returns {string} The HTML-escaped string safe for use in innerHTML.
+ */
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.appendChild(document.createTextNode(String(str)));
