@@ -1,11 +1,16 @@
 import re
 import os
 import hashlib
+import threading
 
 # --- BLACKLIST CONFIGURATION ---
 # Path for the file storing hashes of known malicious payloads
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 BLACKLIST_FILE_PATH = os.path.join(BASE_DIR, 'logs', 'blacklist.txt')
+
+# Lock that serialises all reads and writes to the blacklist file so concurrent
+# requests cannot corrupt it or observe a partially-written hash.
+_blacklist_lock = threading.Lock()
 
 def setup_blacklist():
     """Ensures the logs directory and blacklist file exist."""
@@ -25,17 +30,27 @@ def get_payload_hash(user_input: str) -> str:
     return hashlib.sha256(normalized_input.encode('utf-8')).hexdigest()
 
 def is_blacklisted(payload_hash: str) -> bool:
-    """Checks if a payload hash exists in the blacklist file."""
+    """Checks if a payload hash exists in the blacklist file (exact-line match)."""
     if not os.path.exists(BLACKLIST_FILE_PATH):
         return False
-    with open(BLACKLIST_FILE_PATH, 'r') as f:
-        return payload_hash in f.read()
+    with _blacklist_lock:
+        with open(BLACKLIST_FILE_PATH, 'r') as f:
+            for line in f:
+                if line.strip() == payload_hash:
+                    return True
+    return False
 
 def add_to_blacklist(payload_hash: str, user_input: str):
-    """Adds a payload hash and the original input to the blacklist file."""
+    """Adds a payload hash to the blacklist file (thread-safe)."""
     try:
-        with open(BLACKLIST_FILE_PATH, 'a') as f:
-            f.write(f"{payload_hash}\n")
+        with _blacklist_lock:
+            # Avoid duplicates: check first, then append
+            with open(BLACKLIST_FILE_PATH, 'r') as f:
+                for line in f:
+                    if line.strip() == payload_hash:
+                        return  # Already present
+            with open(BLACKLIST_FILE_PATH, 'a') as f:
+                f.write(f"{payload_hash}\n")
     except Exception as e:
         print(f"Error writing to blacklist: {e}")
 
@@ -45,10 +60,10 @@ MALICIOUS_PATTERNS = [
     r"(?:\bunion\b|\bselect\b|\binsert\b|\bdelete\b|\bdrop\b|\bupdate\b).*?\bfrom\b",  # SQL Injection
     r"(\bscript\b|<script>)",  # XSS Attack
     r"(\balert\b|\bconsole\.log\b)",  # JavaScript-based attacks
-    r"(?:--)|(/\*.*?\*/)|(#.*?\n)",  # Comment-based SQL Injection
+    r"(?:--\s)|(/\*.*?\*/)|(#\s*\n)",  # Comment-based SQL Injection (contextual)
     # Additional SQL Injection Signatures
-    r"(?i)union\s+select", r"(?i)drop\s+table", r"(?i)or\s+1=1", r"--", 
-    r"' or '1'='1", r"1' or '1'='1", r"1' or 1=1--", r"(?i)admin'--", r"#",
+    r"(?i)union\s+select", r"(?i)drop\s+table", r"(?i)or\s+1=1", r"(?i)--\s",
+    r"' or '1'='1", r"1' or '1'='1", r"1' or 1=1--", r"(?i)admin'--",
     r"/\*.*\*/", r"' and '1'='1", r"' and sleep\(", r"(?i)or\s+sleep\(",
     r"'; drop table users;--", r"'; exec xp_cmdshell\(", r"(?i)or\s+1=1--", 
     r"(?i)waitfor\s+delay", r"(?i)select\s+\*", r"';shutdown --", 
@@ -70,16 +85,37 @@ MALICIOUS_PATTERNS = [
     r"&lt;script&gt;", r"(?i)<body onload=", r"onfocus=", r"onblur=", 
     r"onclick=", r"onkeydown=", r"onkeyup=", r"src=javascript:", 
     r"data:text/html;base64", r"(?i)<embed>", r"(?i)confirm\(",
-    # Additional SSRF Signatures
-    r"file://", r"gopher://", r"ftp://", r"http://127\.0\.0\.1", 
-    r"http://localhost", r"169\.254\.", r"internal", 
-    r"metadata\.google\.internal", r"aws", r"azure", 
-    r"kubernetes\.default\.svc", r"169\.254\.169\.254", r"127\.0\.0\.53", 
-    r"metadata\.", r"0x7f000001", r"0:0:0:0:0:ffff:7f00:1", 
-    r"169\.254\.169\.254/latest/meta-data/", r"file:/etc/passwd", 
-    r"file:/c:/windows/system32/", r"http://0x7f000001", 
-    r"localhost:8080", r"127\.0\.0\.1:3306", r"http://10\.", 
-    r"http://192\.168\."
+    # SSRF Signatures — explicit patterns
+    r"file://", r"gopher://",
+    # IPv4 localhost / link-local in all common notations
+    r"(?i)https?://127\.",           # 127.x.x.x
+    r"(?i)https?://127\.0\.0\.1",
+    r"(?i)https?://0x7f",            # hex: 0x7f000001
+    r"(?i)https?://0177\.",          # octal: 0177.0.0.1
+    r"(?i)https?://2130706433",      # decimal: 2130706433 == 127.0.0.1
+    r"(?i)https?://localhost",
+    r"(?i)https?://\[::1\]",         # IPv6 loopback
+    r"(?i)https?://\[::ffff:127\.",  # IPv4-mapped IPv6 loopback
+    r"169\.254\.",                   # link-local / AWS IMDS
+    r"169\.254\.169\.254",
+    r"(?i)169\.254\.169\.254/latest/meta-data/",
+    r"0x7f000001",
+    r"0:0:0:0:0:ffff:7f00:1",
+    r"127\.0\.0\.53",
+    # Cloud metadata endpoints
+    r"metadata\.google\.internal",
+    r"kubernetes\.default\.svc",
+    r"(?i)metadata\.",
+    # Internal / private network ranges
+    r"(?i)https?://10\.",
+    r"(?i)https?://172\.(1[6-9]|2\d|3[01])\.",
+    r"(?i)https?://192\.168\.",
+    r"(?i)https?://0\.",             # 0.x.x.x  (maps to localhost on some stacks)
+    # File-read shortcuts
+    r"file:/etc/passwd",
+    r"file:/c:/windows/system32/",
+    r"ftp://",
+    r"(?i)internal",
 ]
 
 # Define obfuscation patterns (suspicious but not explicit attacks)

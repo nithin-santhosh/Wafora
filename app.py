@@ -1,7 +1,8 @@
 import os
+import secrets
 import logging
 import sys
-from flask import Flask
+from flask import Flask, request
 from src.hybrid_waf.routes.main import main_bp
 from src.hybrid_waf.routes.proxy import proxy_bp
 
@@ -45,10 +46,58 @@ if not os.path.exists(MODEL_PATH):
 
 app = Flask(__name__)
 
+# --- 4. SECRET KEY ---
+# Use the env var in production; fall back to a random key per process for development.
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    import warnings
+    warnings.warn(
+        "SECRET_KEY environment variable is not set. "
+        "A random key is being used, which will invalidate sessions on restart "
+        "and will not work correctly in multi-process deployments. "
+        "Set SECRET_KEY to a long random string in production.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+    _secret_key = secrets.token_hex(32)
+app.secret_key = _secret_key
+
 # Register blueprints
 app.register_blueprint(main_bp)
 app.register_blueprint(proxy_bp)
 
+
+# --- 5. SECURITY HEADERS ---
+@app.after_request
+def add_security_headers(response):
+    """Attaches security-related HTTP headers to every response."""
+    # Prevent browsers from MIME-sniffing the content type
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    # Disallow framing to protect against click-jacking
+    response.headers['X-Frame-Options'] = 'DENY'
+    # Control the referrer information sent with requests
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # Content Security Policy:
+    #   - default-src 'self'          : only load resources from the same origin
+    #   - script-src cdn.jsdelivr.net : allow Chart.js from jsDelivr CDN
+    #   - style-src 'unsafe-inline'   : needed for inline <style> blocks and
+    #                                   dynamically injected styles in home.js
+    #   - font-src fonts.gstatic.com  : allow Google Fonts
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self';"
+    )
+    return response
+
+
 if __name__ == '__main__':
+    # Default to localhost; set FLASK_HOST=0.0.0.0 only when running behind a
+    # reverse proxy or inside a container that handles external exposure.
+    host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    port = int(os.environ.get('FLASK_PORT', '5000'))
     # Run with debug=False for stable logging
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host=host, port=port, debug=False)

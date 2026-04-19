@@ -5,8 +5,9 @@ import shutil
 import tempfile
 import logging
 import uuid
+from functools import wraps
 from collections import deque
-from flask import Blueprint, render_template, send_file, jsonify, make_response, abort, current_app
+from flask import Blueprint, render_template, send_file, jsonify, make_response, abort, current_app, request, Response
 
 # --- Blueprint registration ---
 main_bp = Blueprint('main', __name__)
@@ -14,6 +15,38 @@ main_bp = Blueprint('main', __name__)
 # --- Unified base directory path ---
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 LOG_FILE_PATH = os.path.join(BASE_DIR, 'logs', 'detections.log')
+
+
+# --- Auth guard for sensitive admin endpoints ---
+def require_admin_auth(f):
+    """
+    Enforces HTTP Basic Auth on decorated routes when WAFORA_ADMIN_USER and
+    WAFORA_ADMIN_PASS environment variables are set.  If the variables are not
+    set the guard is a no-op so development environments work without extra
+    configuration, but a warning is logged each time the endpoint is hit so
+    operators are alerted that the endpoint is unprotected.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        admin_user = os.environ.get('WAFORA_ADMIN_USER')
+        admin_pass = os.environ.get('WAFORA_ADMIN_PASS')
+        if admin_user and admin_pass:
+            auth = request.authorization
+            if not auth or auth.username != admin_user or auth.password != admin_pass:
+                return Response(
+                    'Authentication required.',
+                    401,
+                    {'WWW-Authenticate': 'Basic realm="Wafora Admin"'}
+                )
+        else:
+            current_app.logger.warning(
+                "Admin endpoint '%s' accessed without WAFORA_ADMIN_USER / "
+                "WAFORA_ADMIN_PASS configured. Set these env vars in production "
+                "to protect sensitive endpoints.",
+                request.path,
+            )
+        return f(*args, **kwargs)
+    return decorated
 
 
 # --- Helper: Add no-cache headers for API responses ---
@@ -39,6 +72,7 @@ def home():
 
 # --- Download detections report ---
 @main_bp.route('/download-detections-report')
+@require_admin_auth
 def download_report():
     """Safely sends the detections log file for download without causing stream interruptions."""
     try:
